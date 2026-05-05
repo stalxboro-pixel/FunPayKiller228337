@@ -265,17 +265,42 @@ class FunPayClient:
             html_blob = raw.get("html") or ""
             author_id = raw.get("author")
             soup = BeautifulSoup(html_blob, "lxml")
-            text_node = soup.select_one(
-                ".message-text, .alert.alert-with-icon.alert-info, .chat-img-link"
-            )
-            text = (text_node.get_text(strip=True) if text_node else "").strip()
-            if not text:
-                # Fallback to plain stripped HTML if structured selectors missed.
-                text = soup.get_text(strip=True)
+
+            # Pull the author label *before* trimming so we can both record it
+            # and remove it from the message body (FunPay puts the author
+            # name *inside* the same `.message` block as the text, so the
+            # naive `.get_text()` would print it twice).
             author_node = soup.select_one(".media-user-name a, .chat-msg-author")
             author = (author_node.get_text(strip=True) if author_node else None) or None
             if author and not interlocutor_name and author_id != profile.user_id:
                 interlocutor_name = author
+
+            # Strip non-message scaffolding (avatar, header link with the
+            # username, and any image-attachment chrome) so it doesn't bleed
+            # into the body text.
+            for sel in (
+                ".media-user-name",
+                ".message-author",
+                ".chat-message-author",
+                ".chat-img-link",
+                ".message-time",
+                ".avatar",
+                "img",
+            ):
+                for node in soup.select(sel):
+                    node.decompose()
+
+            text_node = soup.select_one(
+                ".message-text, .alert.alert-with-icon.alert-info"
+            )
+            # Use a separator so adjacent inline tags don't glue words together.
+            text = (
+                text_node.get_text(separator=" ", strip=True) if text_node else ""
+            )
+            if not text:
+                text = soup.get_text(separator=" ", strip=True)
+            # Collapse runs of whitespace introduced by the separator.
+            text = re.sub(r"\s+", " ", text).strip()
             sent_at = _parse_message_timestamp(raw)
             msgs.append(
                 ChatMessage(
