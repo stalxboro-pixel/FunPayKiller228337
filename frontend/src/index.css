@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 800px at 0% 0%, rgba(255, 255, 255, 0.025), transparent 60%),
+    radial-gradient(1200px 800px at 100% 100%, rgba(255, 255, 255, 0.018), transparent 60%),
+    #0a0a0a;
+  color: #f5f5f5;
+  font-feature-settings: "cv11", "ss01";
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f1f1f;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
+
+@layer components {
+  /* Neumorphism primitives */
+  .neu {
+    @apply rounded-2xl bg-surface shadow-neu;
+  }
+  .neu-sm {
+    @apply rounded-xl bg-surface shadow-neu-sm;
+  }
+  .neu-inset {
+    @apply rounded-xl bg-surface shadow-neu-inset;
+  }
+  .neu-pressed {
+    @apply rounded-xl bg-surface shadow-neu-pressed;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium
+           transition-all disabled:cursor-not-allowed disabled:opacity-40 select-none;
+  }
+  .btn-primary {
+    @apply btn bg-surface text-ink shadow-neu-sm
+           hover:shadow-neu-pressed hover:translate-y-px active:shadow-neu-pressed;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink2 hover:bg-surface2 hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn bg-surface text-danger shadow-neu-sm
+           hover:shadow-neu-pressed active:shadow-neu-pressed;
+  }
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl bg-surface text-ink2
+           shadow-neu-sm transition-shadow hover:text-ink hover:shadow-neu-pressed;
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full rounded-xl bg-surface px-3 py-2 text-sm text-ink shadow-neu-inset
+           placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-white/15;
+  }
+
+  /* Card / surface */
+  .card {
+    @apply neu p-6;
+  }
+  .card-tight {
+    @apply neu-sm p-4;
+  }
+
+  /* Pill chip */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full bg-surface px-2.5 py-1 text-[11px]
+           font-medium uppercase tracking-wider text-ink2 shadow-neu-inset;
+  }
+
+  /* Form label */
+  .label {
+    @apply mb-1 block text-[11px] font-semibold uppercase tracking-[0.18em] text-muted;
+  }
+
+  /* Sidebar nav link */
+  .nav-link {
+    @apply flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-ink2
+           transition-shadow hover:text-ink;
+  }
+  .nav-link-active {
+    @apply text-ink shadow-neu-pressed bg-surface;
+  }
+
+  /* Chat bubble */
+  .bubble {
+    @apply max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-neu-sm
+           whitespace-pre-wrap break-words;
+  }
+  .bubble-me {
+    @apply bubble bg-white text-black;
+  }
+  .bubble-them {
+    @apply bubble bg-surface text-ink;
+  }
+
+  /* Chat list row */
+  .chat-row {
+    @apply flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-shadow
+           text-ink2 hover:text-ink hover:shadow-neu-pressed;
+  }
+  .chat-row-active {
+    @apply chat-row text-ink shadow-neu-pressed bg-surface;
+  }
+}
