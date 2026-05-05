@@ -58,6 +58,10 @@ frontend/tsconfig.tsbuildinfo
 frontend/*.tsbuildinfo
 app/static/
 
+# Installed plugins (operator-managed at runtime)
+plugins-installed/*
+!plugins-installed/.gitkeep
+
 # Test/coverage
 .pytest_cache/
 .coverage

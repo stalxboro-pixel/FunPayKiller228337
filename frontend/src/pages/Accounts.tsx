@@ -35,7 +35,7 @@ export default function Accounts() {
           {showForm ? "Cancel" : "+ Add account"}
         </button>
       </header>
-      {err && <div className="text-sm text-rose-400">{err}</div>}
+      {err && <div className="card-tight text-sm text-danger">{err}</div>}
       {showForm && (
         <AddAccountForm
           onCancel={() => setShowForm(false)}
@@ -47,7 +47,7 @@ export default function Accounts() {
       )}
       <section className="space-y-3">
         {items === null ? (
-          <div className="text-sm text-muted">Loading…</div>
+          <div className="card text-sm text-muted">Loading…</div>
         ) : items.length === 0 ? (
           <div className="card text-sm text-muted">
             No accounts yet. Add one to start managing chats.
@@ -104,7 +104,7 @@ function AddAccountForm({
 
   return (
     <form onSubmit={submit} className="card grid gap-4 md:grid-cols-2">
-      <div className="md:col-span-1">
+      <div>
         <label className="label">Label</label>
         <input
           className="input"
@@ -113,7 +113,7 @@ function AddAccountForm({
           required
         />
       </div>
-      <div className="md:col-span-1">
+      <div>
         <label className="label">golden_key (FunPay cookie)</label>
         <input
           className="input font-mono"
@@ -152,7 +152,7 @@ function AddAccountForm({
           onChange={(e) => update("note", e.target.value)}
         />
       </div>
-      {err && <div className="md:col-span-2 text-sm text-rose-400">{err}</div>}
+      {err && <div className="md:col-span-2 text-sm text-danger">{err}</div>}
       <div className="md:col-span-2 flex justify-end gap-2">
         <button type="button" className="btn-ghost" onClick={onCancel}>
           Cancel
@@ -226,28 +226,16 @@ function AccountCard({
 
   return (
     <div className="card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-      <div>
-        <div className="flex items-center gap-3">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-lg font-semibold">{account.label}</h3>
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs ${
-              account.enabled
-                ? "bg-emerald-500/10 text-emerald-300"
-                : "bg-slate-500/10 text-slate-400"
-            }`}
-          >
-            {account.enabled ? "enabled" : "disabled"}
-          </span>
-          {account.proxy_present ? (
-            <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-xs text-cyan-300">
-              proxy
-            </span>
-          ) : null}
+          <span className="chip">{account.enabled ? "enabled" : "disabled"}</span>
+          {account.proxy_present && <span className="chip">proxy</span>}
         </div>
-        <div className="text-sm text-muted">
+        <div className="mt-1 text-sm text-muted">
           {account.funpay_username ? (
             <>
-              FunPay: <span className="text-slate-200">{account.funpay_username}</span>
+              FunPay: <span className="text-ink">{account.funpay_username}</span>
               {account.funpay_user_id ? <> · #{account.funpay_user_id}</> : null}
             </>
           ) : (
@@ -255,21 +243,17 @@ function AccountCard({
           )}
         </div>
         <div className="mt-1 text-xs">
-          <span
-            className={`mr-2 ${
-              account.last_check_ok ? "text-emerald-300" : "text-rose-300"
-            }`}
-          >
+          <span className={`mr-2 ${account.last_check_ok ? "text-ink" : "text-danger"}`}>
             ●
           </span>
-          {statusText}
+          <span className="text-ink2">{statusText}</span>
           {account.note ? <span className="ml-2 text-muted">— {account.note}</span> : null}
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <Link
           className="btn-ghost"
-          to={`/accounts/${account.id}/chats`}
+          to={`/chats?account=${account.id}`}
           aria-disabled={!account.enabled}
         >
           Open chats
@@ -284,7 +268,7 @@ function AccountCard({
           Delete
         </button>
       </div>
-      {err && <div className="md:col-span-2 text-sm text-rose-400">{err}</div>}
+      {err && <div className="md:col-span-2 text-sm text-danger">{err}</div>}
     </div>
   );
 }

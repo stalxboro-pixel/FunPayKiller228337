@@ -16,7 +16,9 @@ from fastapi.staticfiles import StaticFiles
 from app import __version__
 from app.config import STATIC_DIR, get_settings
 from app.db import init_db
+from app.plugins.registry import get_plugin_registry
 from app.routers import accounts, auth, chats, plugins
+from app.services.account_session import get_session_manager
 
 log = logging.getLogger("funpay.app")
 SETTINGS = get_settings()
@@ -25,6 +27,11 @@ SETTINGS = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_db()
+    # Best-effort discovery of installed plugin packages on startup.
+    try:
+        get_plugin_registry().discover()
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("Plugin discovery failed: %s", exc)
     if os.environ.get("FPK_PUBLIC_BIND_WARNING") == "1":
         log.warning(
             "FPK_HOST is not localhost (%s). The local panel exposes admin-level endpoints; "
@@ -32,7 +39,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             SETTINGS.host,
         )
     log.info("FunPay Killer %s started (env=%s).", __version__, SETTINGS.env)
-    yield
+    try:
+        yield
+    finally:
+        await get_session_manager().shutdown()
 
 
 def create_app() -> FastAPI:
@@ -57,7 +67,7 @@ def create_app() -> FastAPI:
     )
 
     @app.middleware("http")
-    async def _security_headers(request: Request, call_next) -> Response:  # type: ignore[no-untyped-def]
+    async def _security_headers(request: Request, call_next) -> Response:
         response: Response = await call_next(request)
         # OWASP Secure Headers: deny framing, deny content-type sniffing, set CSP, etc.
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

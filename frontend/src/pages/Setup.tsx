@@ -78,7 +78,7 @@ export default function Setup({ onDone }: Props) {
             minLength={8}
           />
         </div>
-        {err && <div className="text-sm text-rose-400">{err}</div>}
+        {err && <div className="text-sm text-danger">{err}</div>}
         <button className="btn-primary w-full" disabled={busy}>
           {busy ? "Creating…" : "Create admin"}
         </button>

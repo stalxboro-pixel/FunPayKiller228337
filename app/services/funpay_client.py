@@ -1,14 +1,13 @@
 """Async HTTP client for FunPay.
 
-FunPay has no official public API; this client scrapes the same pages that the
-website uses and POSTs to the same internal `/runner/` endpoint. Because the
-underlying HTML/JSON shapes are the property of FunPay and may change at any
-time, all parsing is wrapped in defensive error handling so the panel keeps
-working even when individual fields go missing.
+FunPay has no official public API; this client talks to the same endpoints the
+website uses (`/`, `/runner/`, `/chat/history`) and authenticates with a single
+`golden_key` cookie. Each `FunPayClient` is bound to one account and uses that
+account's cookie, proxy URL (HTTP/HTTPS/SOCKS) and user-agent — credentials
+are *never* shared between accounts.
 
-Each `FunPayClient` is bound to a single account and uses that account's
-golden_key cookie, proxy URL (HTTP/SOCKS), and user-agent. Cookies / proxies /
-UAs are NEVER shared between accounts.
+Reference: https://github.com/LIMBODS/FunPayAPI (GPL-3.0) — used for
+endpoint reverse-engineering only; no source is copied.
 """
 
 from __future__ import annotations
@@ -16,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -28,7 +28,6 @@ from app.config import get_settings
 from app.schemas.chat import ChatMessage, ChatPreview, ChatThread
 
 log = logging.getLogger("funpay.client")
-
 _settings = get_settings()
 
 
@@ -38,6 +37,10 @@ class FunPayError(RuntimeError):
 
 class FunPayAuthError(FunPayError):
     """Raised when the golden_key is invalid or the session is unauthenticated."""
+
+
+class FunPayMessageRejected(FunPayError):
+    """Raised when FunPay accepts the request but rejects the message itself."""
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,7 @@ class FunPayCredentials:
 class FunPayProfile:
     user_id: int
     username: str
-    csrf_token: str | None = None
+    csrf_token: str
 
 
 def _build_httpx_client(creds: FunPayCredentials) -> httpx.AsyncClient:
@@ -61,12 +64,10 @@ def _build_httpx_client(creds: FunPayCredentials) -> httpx.AsyncClient:
         "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
     }
     cookies = {"golden_key": creds.golden_key, "locale": "en"}
-    # httpx accepts http(s) and socks5(h) proxies natively (with the [socks] extra installed).
-    proxies: str | None = creds.proxy_url or None
     return httpx.AsyncClient(
         headers=headers,
         cookies=cookies,
-        proxy=proxies,
+        proxy=creds.proxy_url or None,
         timeout=_settings.funpay_request_timeout_seconds,
         follow_redirects=True,
         http2=False,
@@ -74,9 +75,10 @@ def _build_httpx_client(creds: FunPayCredentials) -> httpx.AsyncClient:
     )
 
 
-def _extract_app_data(html: str) -> dict[str, Any] | None:
+def _extract_app_data(html: str, soup: BeautifulSoup | None = None) -> dict[str, Any] | None:
     """Pull the `data-app-data` JSON blob from the FunPay <body> tag (if present)."""
-    soup = BeautifulSoup(html, "lxml")
+    if soup is None:
+        soup = BeautifulSoup(html, "lxml")
     body = soup.find("body")
     if not isinstance(body, Tag):
         return None
@@ -89,15 +91,19 @@ def _extract_app_data(html: str) -> dict[str, Any] | None:
         return None
 
 
-def _is_unauthenticated_html(html: str) -> bool:
-    # When golden_key is invalid/expired, FunPay shows the marketing landing page
-    # without an authenticated user block. We use a couple of heuristics.
-    if "data-app-data" not in html:
-        return True
-    return False
-
-
+_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _USER_LINK_RE = re.compile(r"/users/(\d+)/?")
+
+
+def _coerce_chat_id(chat_id: str) -> int | str:
+    """FunPay treats numeric chat ids as ints; private chats use `users-<a>-<b>`."""
+    if chat_id.isdigit():
+        return int(chat_id)
+    return chat_id
+
+
+def _random_tag() -> str:
+    return secrets.token_hex(4)
 
 
 class FunPayClient:
@@ -106,6 +112,7 @@ class FunPayClient:
     def __init__(self, creds: FunPayCredentials) -> None:
         self._creds = creds
         self._client: httpx.AsyncClient | None = None
+        self._profile: FunPayProfile | None = None
 
     async def __aenter__(self) -> FunPayClient:
         self._client = _build_httpx_client(self._creds)
@@ -122,11 +129,19 @@ class FunPayClient:
             raise RuntimeError("FunPayClient must be used as an async context manager")
         return self._client
 
-    async def fetch_profile(self) -> FunPayProfile:
-        """Fetch the main page and resolve the authenticated user.
+    # ------------------------------------------------------------------
+    # Profile / CSRF
+    # ------------------------------------------------------------------
 
-        Raises FunPayAuthError if the cookie is invalid; FunPayError otherwise.
+    async def fetch_profile(self, *, force: bool = False) -> FunPayProfile:
+        """Fetch the main page, resolve the authenticated user + CSRF token.
+
+        Memoised on the client instance — only the first call hits the network
+        unless `force=True`. Raises FunPayAuthError if golden_key is invalid.
         """
+        if self._profile is not None and not force:
+            return self._profile
+
         url = urljoin(_settings.funpay_base_url, "/")
         try:
             resp = await self.http.get(url)
@@ -136,194 +151,252 @@ class FunPayClient:
         if resp.status_code >= 500:
             raise FunPayError(f"FunPay returned HTTP {resp.status_code}")
         html = resp.text
-        if _is_unauthenticated_html(html):
+        if "data-app-data" not in html:
             raise FunPayAuthError("FunPay didn't recognise the golden_key (not logged in).")
 
-        data = _extract_app_data(html) or {}
-        user = data.get("user") or {}
-        user_id = user.get("id") or data.get("userId")
-        username = user.get("username") or data.get("username")
+        soup = BeautifulSoup(html, "lxml")
+        data = _extract_app_data(html, soup) or {}
+        user_id_raw = data.get("userId") or (data.get("user") or {}).get("id")
         csrf = data.get("csrf-token") or data.get("csrfToken")
-        if not user_id or not username:
-            # Fallback: scan a "/users/<id>/" link near the header.
-            soup = BeautifulSoup(html, "lxml")
+        username: str | None = None
+        username_node = soup.select_one(".user-link-name, .header-user-name")
+        if username_node:
+            username = username_node.get_text(strip=True) or None
+        if not username:
             link = soup.find("a", href=_USER_LINK_RE)
             if isinstance(link, Tag):
-                match = _USER_LINK_RE.search(link.get("href") or "")
-                if match:
-                    user_id = int(match.group(1))
-                    username = (link.get_text() or "").strip() or f"user{user_id}"
-        if not user_id or not username:
+                username = (link.get_text() or "").strip() or None
+        if not user_id_raw or not username or not csrf:
             raise FunPayAuthError(
-                "Could not extract authenticated user from FunPay home page."
+                "Could not extract authenticated user / CSRF token from FunPay home page."
             )
-        return FunPayProfile(user_id=int(user_id), username=str(username), csrf_token=csrf)
+        self._profile = FunPayProfile(
+            user_id=int(user_id_raw), username=str(username), csrf_token=str(csrf)
+        )
+        return self._profile
+
+    # ------------------------------------------------------------------
+    # Chat list (via /runner/ chat_bookmarks — much cheaper than scraping /chat/)
+    # ------------------------------------------------------------------
 
     async def list_chats(self) -> list[ChatPreview]:
-        """List recent chats from the messages page."""
-        url = urljoin(_settings.funpay_base_url, "/chat/")
-        try:
-            resp = await self.http.get(url)
-        except httpx.HTTPError as exc:
-            raise FunPayError(f"Network error: {exc}") from exc
-        if resp.status_code != 200:
-            raise FunPayError(f"FunPay returned HTTP {resp.status_code} for /chat/")
+        profile = await self.fetch_profile()
+        objects = [
+            {
+                "type": "chat_bookmarks",
+                "id": profile.user_id,
+                "tag": _random_tag(),
+                "data": False,
+            }
+        ]
+        body = await self._runner_post(objects=objects, request=False, csrf=profile.csrf_token)
 
-        soup = BeautifulSoup(resp.text, "lxml")
-        chats: list[ChatPreview] = []
-        # FunPay's chat list items use the `.contact-item` / `.chat-list` hierarchy in the
-        # current UI. We support both common variants.
-        seen: set[str] = set()
-        candidates = soup.select("a.contact-item, a[data-id].chat-item, .chat-list a")
-        for node in candidates:
-            if not isinstance(node, Tag):
+        # Find the bookmarks object regardless of order.
+        html_blob = ""
+        for obj in body.get("objects") or []:
+            if obj.get("type") == "chat_bookmarks":
+                data = obj.get("data") or {}
+                html_blob = data.get("html") or ""
+                break
+        if not html_blob:
+            return []
+
+        soup = BeautifulSoup(html_blob, "lxml")
+        previews: list[ChatPreview] = []
+        for node in soup.select("a.contact-item"):
+            chat_id = node.get("data-id")
+            if not chat_id:
                 continue
-            chat_id = (
-                node.get("data-id")
-                or node.get("data-node-id")
-                or node.get("data-node")
-                or node.get("data-chat-id")
-                or _id_from_href(node.get("href"))
-            )
-            if not chat_id or chat_id in seen:
-                continue
-            seen.add(str(chat_id))
-            title_node = node.select_one(".media-user-name, .chat-name, .contact-item__username")
-            preview_node = node.select_one(
-                ".contact-item__message-text, .chat-message, .media-body"
-            )
-            title = (title_node.get_text() if title_node else node.get_text() or "").strip()
-            preview = (preview_node.get_text().strip() if preview_node else None) or None
-            unread_classes = (node.get("class") or [])
-            unread = any("unread" in c for c in unread_classes)
-            chats.append(
+            title_node = node.select_one(".media-user-name")
+            preview_node = node.select_one(".contact-item-message")
+            classes = node.get("class") or []
+            title = (title_node.get_text(strip=True) if title_node else "") or f"chat {chat_id}"
+            preview = preview_node.get_text(strip=True) if preview_node else None
+            unread = "unread" in classes
+            previews.append(
                 ChatPreview(
                     id=str(chat_id),
-                    title=title or f"chat {chat_id}",
-                    last_message=preview,
+                    title=title,
+                    last_message=preview or None,
                     unread=unread,
                 )
             )
-        return chats
+        return previews
 
-    async def get_chat(self, chat_id: str) -> ChatThread:
-        if not re.match(r"^[A-Za-z0-9_\-]{1,64}$", chat_id):
+    # ------------------------------------------------------------------
+    # Chat history (JSON endpoint — far faster than the HTML chat page)
+    # ------------------------------------------------------------------
+
+    async def get_chat(self, chat_id: str, *, last_message_id: int | None = None) -> ChatThread:
+        if not _CHAT_ID_RE.match(chat_id):
             raise FunPayError("Invalid chat id")
-        url = urljoin(_settings.funpay_base_url, f"/chat/?node={chat_id}")
+        profile = await self.fetch_profile()
+        coerced = _coerce_chat_id(chat_id)
+        last = last_message_id if last_message_id is not None else 99999999999
+        url = urljoin(_settings.funpay_base_url, "/chat/history")
         try:
-            resp = await self.http.get(url)
+            resp = await self.http.get(
+                url,
+                params={"node": coerced, "last_message": last},
+                headers={
+                    "Accept": "*/*",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": urljoin(_settings.funpay_base_url, f"/chat/?node={coerced}"),
+                },
+            )
         except httpx.HTTPError as exc:
             raise FunPayError(f"Network error: {exc}") from exc
         if resp.status_code != 200:
-            raise FunPayError(f"FunPay returned HTTP {resp.status_code} for /chat/")
+            raise FunPayError(f"FunPay returned HTTP {resp.status_code} for /chat/history")
+        try:
+            body = resp.json()
+        except ValueError as exc:
+            raise FunPayError("FunPay returned non-JSON for /chat/history") from exc
 
-        soup = BeautifulSoup(resp.text, "lxml")
-        title_node = soup.select_one(".chat-header__name, .chat-full-header .media-user-name")
-        title = (title_node.get_text().strip() if title_node else f"chat {chat_id}") or chat_id
+        chat = body.get("chat") or {}
+        node_info = chat.get("node") or {}
+        title = node_info.get("name") or f"chat {chat_id}"
+        # Try to derive a human title from the messages' author block.
+        messages_json = chat.get("messages") or []
 
-        messages: list[ChatMessage] = []
-        my_user_id: int | None = None
-        app_data = _extract_app_data(resp.text) or {}
-        user = app_data.get("user") or {}
-        if isinstance(user.get("id"), int):
-            my_user_id = int(user["id"])
-
-        for node in soup.select(
-            ".chat-message, .message-container, .chat-msg-item, [data-message-id]"
-        ):
-            if not isinstance(node, Tag):
-                continue
-            msg_id = node.get("data-message-id") or node.get("data-id") or None
-            text_node = node.select_one(".chat-message__text, .message-text, .media-body")
-            text = (text_node.get_text().strip() if text_node else node.get_text().strip()) or ""
-            author_node = node.select_one(
-                ".chat-message-author, .message-author, .media-user-name"
+        msgs: list[ChatMessage] = []
+        interlocutor_name: str | None = None
+        for raw in messages_json:
+            html_blob = raw.get("html") or ""
+            author_id = raw.get("author")
+            soup = BeautifulSoup(html_blob, "lxml")
+            text_node = soup.select_one(
+                ".message-text, .alert.alert-with-icon.alert-info, .chat-img-link"
             )
-            author = (author_node.get_text().strip() if author_node else None) or None
-            author_link = node.select_one("a[href*='/users/']")
-            is_me = False
-            if author_link and isinstance(author_link, Tag):
-                href = author_link.get("href") or ""
-                m = _USER_LINK_RE.search(href)
-                if m and my_user_id is not None and int(m.group(1)) == my_user_id:
-                    is_me = True
-            sent_at = _parse_message_timestamp(node)
+            text = (text_node.get_text(strip=True) if text_node else "").strip()
             if not text:
-                continue
-            messages.append(
+                # Fallback to plain stripped HTML if structured selectors missed.
+                text = soup.get_text(strip=True)
+            author_node = soup.select_one(".media-user-name a, .chat-msg-author")
+            author = (author_node.get_text(strip=True) if author_node else None) or None
+            if author and not interlocutor_name and author_id != profile.user_id:
+                interlocutor_name = author
+            sent_at = _parse_message_timestamp(raw)
+            msgs.append(
                 ChatMessage(
-                    id=str(msg_id) if msg_id else None,
+                    id=str(raw.get("id")) if raw.get("id") is not None else None,
                     author=author,
-                    is_me=is_me,
+                    is_me=(author_id == profile.user_id),
                     text=text,
                     sent_at=sent_at,
                 )
             )
-        return ChatThread(id=chat_id, title=title, messages=messages)
+        if interlocutor_name:
+            title = interlocutor_name
+        return ChatThread(id=chat_id, title=title, messages=msgs)
+
+    # ------------------------------------------------------------------
+    # Send message
+    # ------------------------------------------------------------------
 
     async def send_message(self, chat_id: str, text: str) -> None:
-        """Send a chat message via the FunPay /runner/ endpoint."""
-        if not re.match(r"^[A-Za-z0-9_\-]{1,64}$", chat_id):
+        if not _CHAT_ID_RE.match(chat_id):
             raise FunPayError("Invalid chat id")
         if not text or not text.strip():
             raise FunPayError("Empty message")
-
-        # Refresh CSRF + profile each send. The runner endpoint requires the same csrf-token
-        # FunPay's own JS sends, which lives on the body's data-app-data blob.
         profile = await self.fetch_profile()
-        if not profile.csrf_token:
-            raise FunPayError("Could not obtain CSRF token from FunPay")
+        coerced = _coerce_chat_id(chat_id)
 
-        payload = {
+        request = {
             "action": "chat_message",
-            "data": json.dumps(
-                {"node": chat_id, "last_message": -1, "content": text}, ensure_ascii=False
-            ),
+            "data": {"node": coerced, "last_message": -1, "content": text},
         }
-        headers = {
+        objects = [
+            {
+                "type": "chat_node",
+                "id": coerced,
+                "tag": _random_tag(),
+                "data": {"node": coerced, "last_message": -1, "content": ""},
+            }
+        ]
+        body = await self._runner_post(
+            objects=objects,
+            request=request,
+            csrf=profile.csrf_token,
+            referer=f"/chat/?node={coerced}",
+        )
+
+        # Successful runner response: {"response": {...}, "objects": [...]}
+        response_obj = body.get("response")
+        if not isinstance(response_obj, dict):
+            # If the CSRF expired, FunPay sometimes returns an error/redirect; force-refresh
+            # and try once more.
+            await self.fetch_profile(force=True)
+            raise FunPayMessageRejected(
+                "FunPay didn't return a runner response — message likely not delivered."
+            )
+        error_text = response_obj.get("error")
+        if error_text:
+            # Common cause: stale CSRF token. Re-fetch and retry once.
+            if "csrf" in str(error_text).lower():
+                await self.fetch_profile(force=True)
+                request["data"]["node"] = coerced  # type: ignore[index]
+                body = await self._runner_post(
+                    objects=objects,
+                    request=request,
+                    csrf=self._profile.csrf_token if self._profile else profile.csrf_token,
+                    referer=f"/chat/?node={coerced}",
+                )
+                response_obj = body.get("response") or {}
+                if response_obj.get("error"):
+                    raise FunPayMessageRejected(str(response_obj["error"]))
+                return
+            raise FunPayMessageRejected(str(error_text))
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    async def _runner_post(
+        self,
+        *,
+        objects: list[dict[str, Any]] | bool,
+        request: dict[str, Any] | bool,
+        csrf: str,
+        referer: str | None = None,
+    ) -> dict[str, Any]:
+        url = urljoin(_settings.funpay_base_url, "/runner/")
+        form = {
+            "objects": json.dumps(objects, ensure_ascii=False) if objects is not False else "",
+            "request": json.dumps(request, ensure_ascii=False) if request is not False else "false",
+            "csrf_token": csrf,
+        }
+        headers: dict[str, str] = {
+            "Accept": "*/*",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
             "X-Requested-With": "XMLHttpRequest",
             "Origin": _settings.funpay_base_url,
-            "Referer": urljoin(_settings.funpay_base_url, f"/chat/?node={chat_id}"),
-            "Accept": "*/*",
         }
-        runner_url = urljoin(_settings.funpay_base_url, "/runner/")
-        form = {
-            "objects": "",
-            "request": json.dumps(payload, ensure_ascii=False),
-            "csrf_token": profile.csrf_token,
-        }
+        if referer:
+            headers["Referer"] = urljoin(_settings.funpay_base_url, referer)
         try:
-            resp = await self.http.post(runner_url, data=form, headers=headers)
+            resp = await self.http.post(url, data=form, headers=headers)
         except httpx.HTTPError as exc:
-            raise FunPayError(f"Network error sending message: {exc}") from exc
-
+            raise FunPayError(f"Network error: {exc}") from exc
+        if resp.status_code == 401 or resp.status_code == 403:
+            raise FunPayAuthError(f"FunPay refused /runner/ ({resp.status_code})")
         if resp.status_code != 200:
-            raise FunPayError(f"FunPay returned HTTP {resp.status_code} when sending message")
+            raise FunPayError(f"FunPay /runner/ returned HTTP {resp.status_code}")
         try:
-            body = resp.json()
+            data = resp.json()
         except ValueError as exc:
             raise FunPayError("FunPay returned a non-JSON response from /runner/") from exc
-        if isinstance(body, dict) and body.get("error"):
-            raise FunPayError(f"FunPay refused the message: {body['error']}")
+        if not isinstance(data, dict):
+            raise FunPayError("Unexpected /runner/ response shape (not an object)")
+        return data
 
 
-def _id_from_href(href: object) -> str | None:
-    if not isinstance(href, str):
-        return None
-    m = re.search(r"node=([A-Za-z0-9_\-]+)", href)
-    if m:
-        return m.group(1)
-    m = re.search(r"/chat/(\d+)", href)
-    if m:
-        return m.group(1)
-    return None
-
-
-def _parse_message_timestamp(node: Tag) -> datetime | None:
-    ts = node.get("data-time") or node.get("data-timestamp")
-    if isinstance(ts, str) and ts.isdigit():
-        try:
-            return datetime.fromtimestamp(int(ts), tz=timezone.utc)
-        except (OverflowError, OSError, ValueError):
-            return None
+def _parse_message_timestamp(raw: dict[str, Any]) -> datetime | None:
+    for key in ("createdAt", "created_at", "time", "date"):
+        v = raw.get(key)
+        if isinstance(v, (int, float)) and v > 0:
+            try:
+                return datetime.fromtimestamp(int(v), tz=timezone.utc)
+            except (OSError, OverflowError, ValueError):
+                return None
     return None

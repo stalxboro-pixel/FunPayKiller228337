@@ -5,8 +5,8 @@ import Login from "./pages/Login";
 import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
-import AccountChats from "./pages/AccountChats";
-import ChatThreadPage from "./pages/ChatThread";
+import Chats from "./pages/Chats";
+import Plugins from "./pages/Plugins";
 import Layout from "./components/Layout";
 
 type AuthState =
@@ -47,7 +47,7 @@ export default function App() {
 
   if (auth.status === "loading") {
     return (
-      <div className="flex h-full items-center justify-center text-muted">Loading…</div>
+      <div className="grid h-full place-items-center text-muted">Loading…</div>
     );
   }
 
@@ -108,11 +108,8 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="accounts" element={<Accounts />} />
-        <Route path="accounts/:accountId/chats" element={<AccountChats />} />
-        <Route
-          path="accounts/:accountId/chats/:chatId"
-          element={<ChatThreadPage />}
-        />
+        <Route path="chats" element={<Chats />} />
+        <Route path="plugins" element={<Plugins />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

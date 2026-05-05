@@ -20,12 +20,13 @@ function readCsrf(): string {
 async function request<T>(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  init?: { rawBody?: BodyInit }
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
   };
-  if (body !== undefined) {
+  if (body !== undefined && !init?.rawBody) {
     headers["Content-Type"] = "application/json";
   }
   if (!["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase())) {
@@ -36,7 +37,7 @@ async function request<T>(
   const resp = await fetch(path, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: init?.rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
     credentials: "same-origin",
   });
   if (resp.status === 204) return undefined as T;
@@ -62,6 +63,11 @@ export const api = {
   post: <T>(p: string, body?: unknown) => request<T>("POST", p, body),
   patch: <T>(p: string, body?: unknown) => request<T>("PATCH", p, body),
   del: <T>(p: string) => request<T>("DELETE", p),
+  upload: <T>(p: string, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<T>("POST", p, undefined, { rawBody: fd });
+  },
 };
 
 export type SetupStatus = { setup_complete: boolean };
@@ -123,5 +129,10 @@ export type PluginInfo = {
   name: string;
   version: string;
   description: string;
-  requires_funpay_account: boolean;
+  author: string | null;
+  enabled: boolean;
+  error: string | null;
+  files: string[];
 };
+
+export type SendMessageRequest = { text: string };

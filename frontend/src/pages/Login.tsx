@@ -54,7 +54,7 @@ export default function Login({ onLoggedIn }: Props) {
             required
           />
         </div>
-        {err && <div className="text-sm text-rose-400">{err}</div>}
+        {err && <div className="text-sm text-danger">{err}</div>}
         <button className="btn-primary w-full" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}
         </button>

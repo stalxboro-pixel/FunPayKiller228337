@@ -15,6 +15,8 @@ DATA_DIR = PROJECT_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_DIR = PROJECT_ROOT / "app" / "static"
 MASTER_KEY_FILE = DATA_DIR / ".master.key"
+PLUGINS_INSTALLED_DIR = PROJECT_ROOT / "plugins-installed"
+PLUGINS_INSTALLED_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _ensure_master_key() -> str:

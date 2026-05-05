@@ -6,50 +6,52 @@ type Props = {
   onLogout: () => void;
 };
 
+const NAV: Array<{ to: string; label: string; end?: boolean }> = [
+  { to: "/", label: "Dashboard", end: true },
+  { to: "/accounts", label: "Accounts" },
+  { to: "/chats", label: "Chats" },
+  { to: "/plugins", label: "Plugins" },
+];
+
 export default function Layout({ me, onLogout }: Props) {
   return (
-    <div className="mx-auto flex min-h-full max-w-7xl flex-col">
-      <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <Link to="/" className="flex items-center gap-3">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-accent to-accent2 text-bg font-black">
+    <div className="grid h-full min-h-screen grid-cols-[260px_1fr] gap-6 p-6">
+      <aside className="neu flex flex-col gap-4 p-5">
+        <Link to="/" className="flex items-center gap-3 px-1 py-1">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-surface text-ink shadow-neu-sm font-black">
             F
           </span>
-          <span className="text-lg font-semibold tracking-wide">
+          <span className="text-base font-semibold tracking-wide">
             FunPay <span className="text-muted">Killer</span>
           </span>
         </Link>
-        <nav className="flex items-center gap-2 text-sm">
-          <NavLink
-            to="/"
-            end
-            className={({ isActive }) =>
-              `btn-ghost ${isActive ? "border-accent text-accent" : ""}`
-            }
-          >
-            Dashboard
-          </NavLink>
-          <NavLink
-            to="/accounts"
-            className={({ isActive }) =>
-              `btn-ghost ${isActive ? "border-accent text-accent" : ""}`
-            }
-          >
-            Accounts
-          </NavLink>
-          <span className="ml-3 text-muted">
-            <span className="text-slate-300">{me.username}</span>
-          </span>
-          <button onClick={onLogout} className="btn-ghost">
-            Log out
-          </button>
+        <nav className="flex flex-col gap-1">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                isActive ? "nav-link nav-link-active" : "nav-link"
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
-      </header>
-      <main className="flex-1 px-6 py-8">
+        <div className="mt-auto neu-inset p-3 text-[11px] leading-relaxed text-muted">
+          <div className="text-ink2">
+            <span className="text-ink">{me.username}</span>
+          </div>
+          <div className="mt-1">Localhost only · Encrypted at rest</div>
+        </div>
+        <button onClick={onLogout} className="btn-primary w-full">
+          Log out
+        </button>
+      </aside>
+      <main className="min-w-0">
         <Outlet />
       </main>
-      <footer className="border-t border-border px-6 py-4 text-center text-xs text-muted">
-        Bound to localhost only · Encrypted credentials at rest · MVP
-      </footer>
     </div>
   );
 }

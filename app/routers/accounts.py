@@ -18,6 +18,7 @@ from app.schemas.account import (
 )
 from app.security import get_current_user, require_csrf
 from app.services.account_service import probe_account
+from app.services.account_session import get_session_manager
 
 router = APIRouter(
     prefix="/api/accounts",
@@ -84,7 +85,7 @@ def get_account(account_id: int, db: Session = Depends(get_db)) -> AccountOut:
 
 
 @router.patch("/{account_id}", response_model=AccountOut, dependencies=[Depends(require_csrf)])
-def update_account(
+async def update_account(
     account_id: int, payload: AccountUpdate, db: Session = Depends(get_db)
 ) -> AccountOut:
     a = db.get(Account, account_id)
@@ -113,6 +114,8 @@ def update_account(
     db.add(a)
     db.commit()
     db.refresh(a)
+    # Invalidate cached session so credential changes take effect immediately.
+    await get_session_manager().evict(a.id)
     return _to_out(a)
 
 
@@ -121,12 +124,13 @@ def update_account(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_csrf)],
 )
-def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
+async def delete_account(account_id: int, db: Session = Depends(get_db)) -> None:
     a = db.get(Account, account_id)
     if a is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     db.delete(a)
     db.commit()
+    await get_session_manager().evict(account_id)
 
 
 @router.post(
@@ -141,6 +145,8 @@ async def check_account(
     if a is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND)
     ok, err = await probe_account(a, db)
+    # Force the session pool to refetch the profile next time.
+    await get_session_manager().evict(a.id)
     return AccountCheckResult(
         ok=ok,
         funpay_user_id=a.funpay_user_id,
