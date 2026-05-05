@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [devin/1777989869-mvp-funpay-manager]
   pull_request:
 
 jobs:
