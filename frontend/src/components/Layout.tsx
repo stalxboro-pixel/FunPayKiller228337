@@ -6,48 +6,65 @@ type Props = {
   onLogout: () => void;
 };
 
-const NAV: Array<{ to: string; label: string; end?: boolean }> = [
-  { to: "/", label: "Dashboard", end: true },
-  { to: "/accounts", label: "Accounts" },
-  { to: "/chats", label: "Chats" },
-  { to: "/plugins", label: "Plugins" },
+const NAV: Array<{
+  to: string;
+  label: string;
+  end?: boolean;
+  icon: string;
+}> = [
+  { to: "/", label: "Home", end: true, icon: "◇" },
+  { to: "/accounts", label: "Acct", icon: "◎" },
+  { to: "/chats", label: "Chat", icon: "❒" },
+  { to: "/plugins", label: "Plug", icon: "✦" },
 ];
 
 export default function Layout({ me, onLogout }: Props) {
   return (
-    <div className="grid h-full min-h-screen grid-cols-[260px_1fr] gap-6 p-6">
-      <aside className="neu flex flex-col gap-4 p-5">
-        <Link to="/" className="flex items-center gap-3 px-1 py-1">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-surface text-ink shadow-neu-sm font-black">
-            F
-          </span>
-          <span className="text-base font-semibold tracking-wide">
-            FunPay <span className="text-muted">Killer</span>
-          </span>
+    <div className="grid h-full min-h-screen grid-cols-[112px_1fr] gap-4 p-4">
+      <aside className="neu flex flex-col items-stretch gap-3 p-3">
+        <Link
+          to="/"
+          className="grid h-10 w-10 mx-auto place-items-center rounded-xl bg-surface text-ink shadow-neu-sm font-black"
+          title={`FunPay Killer · ${me.username}`}
+        >
+          F
         </Link>
-        <nav className="flex flex-col gap-1">
+        <nav className="flex flex-col gap-1.5">
           {NAV.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.end}
+              title={item.label}
               className={({ isActive }) =>
-                isActive ? "nav-link nav-link-active" : "nav-link"
+                isActive
+                  ? "flex flex-col items-center gap-0.5 rounded-xl px-1 py-2 text-[10px] uppercase tracking-wider text-ink shadow-neu-pressed bg-surface"
+                  : "flex flex-col items-center gap-0.5 rounded-xl px-1 py-2 text-[10px] uppercase tracking-wider text-ink2 transition-shadow hover:text-ink"
               }
             >
+              <span aria-hidden className="text-base leading-none">
+                {item.icon}
+              </span>
               {item.label}
             </NavLink>
           ))}
         </nav>
-        <div className="mt-auto neu-inset p-3 text-[11px] leading-relaxed text-muted">
-          <div className="text-ink2">
-            <span className="text-ink">{me.username}</span>
+        <div className="mt-auto flex flex-col items-center gap-2">
+          <div
+            className="truncate text-center text-[10px] text-muted"
+            title={me.username}
+          >
+            {me.username}
           </div>
-          <div className="mt-1">Localhost only · Encrypted at rest</div>
+          <button
+            onClick={onLogout}
+            className="btn-icon"
+            title="Log out"
+            aria-label="Log out"
+          >
+            ⏻
+          </button>
         </div>
-        <button onClick={onLogout} className="btn-primary w-full">
-          Log out
-        </button>
       </aside>
       <main className="min-w-0">
         <Outlet />

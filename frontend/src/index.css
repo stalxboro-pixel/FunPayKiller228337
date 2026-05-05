@@ -108,10 +108,10 @@ body {
            whitespace-pre-wrap break-words;
   }
   .bubble-me {
-    @apply bubble bg-white text-black;
+    @apply bubble bg-surface2 text-ink;
   }
   .bubble-them {
-    @apply bubble bg-surface text-ink;
+    @apply bubble bg-surface text-ink2;
   }
 
   /* Chat list row */
