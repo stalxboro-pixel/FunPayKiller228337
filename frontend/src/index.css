@@ -2,6 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Theme tokens. Triplets so Tailwind's `<alpha-value>` placeholder keeps
+ * composing utilities like `border-line/40` correctly.
+ *
+ * Dark (default): black surface, soft inset/outset highlights.
+ * Light: bright neutral surface with desaturated greys for shadows.
+ */
+:root {
+  color-scheme: dark;
+  --c-bg: 10 10 10;
+  --c-surface: 17 17 17;
+  --c-surface2: 22 22 22;
+  --c-rim: 31 31 31;
+  --c-line: 38 38 38;
+  --c-ink: 245 245 245;
+  --c-ink2: 207 207 207;
+  --c-muted: 124 124 124;
+  --c-accent: 255 255 255;
+  --c-danger: 248 113 113;
+  --c-success: 52 211 153;
+
+  --neu-shadow-dark: rgba(0, 0, 0, 0.65);
+  --neu-shadow-light: rgba(60, 60, 60, 0.10);
+
+  --bg-grad-1: rgba(255, 255, 255, 0.025);
+  --bg-grad-2: rgba(255, 255, 255, 0.018);
+
+  --scrollbar-track: #0a0a0a;
+  --scrollbar-thumb: #1f1f1f;
+  --scrollbar-thumb-hover: #2a2a2a;
+}
+
+html.light {
+  color-scheme: light;
+  --c-bg: 232 232 235;
+  --c-surface: 240 240 243;
+  --c-surface2: 226 226 230;
+  --c-rim: 214 214 219;
+  --c-line: 199 199 205;
+  --c-ink: 24 24 27;
+  --c-ink2: 64 64 70;
+  --c-muted: 110 110 116;
+  --c-accent: 24 24 27;
+  --c-danger: 185 28 28;
+  --c-success: 5 122 85;
+
+  --neu-shadow-dark: rgba(166, 168, 173, 0.55);
+  --neu-shadow-light: rgba(255, 255, 255, 0.95);
+
+  --bg-grad-1: rgba(0, 0, 0, 0.03);
+  --bg-grad-2: rgba(0, 0, 0, 0.02);
+
+  --scrollbar-track: #e8e8eb;
+  --scrollbar-thumb: #c5c5cb;
+  --scrollbar-thumb-hover: #a8a8b0;
+}
+
 html,
 body,
 #root {
@@ -10,11 +67,18 @@ body,
 
 body {
   background:
-    radial-gradient(1200px 800px at 0% 0%, rgba(255, 255, 255, 0.025), transparent 60%),
-    radial-gradient(1200px 800px at 100% 100%, rgba(255, 255, 255, 0.018), transparent 60%),
-    #0a0a0a;
-  color: #f5f5f5;
+    radial-gradient(1200px 800px at 0% 0%, var(--bg-grad-1), transparent 60%),
+    radial-gradient(1200px 800px at 100% 100%, var(--bg-grad-2), transparent 60%),
+    rgb(var(--c-bg));
+  color: rgb(var(--c-ink));
   font-feature-settings: "cv11", "ss01";
+  /*
+   * Animate the page-wide colour swap so the theme toggle feels smooth.
+   * 200ms keeps the animation snappy without being distracting.
+   */
+  transition:
+    background-color 200ms ease,
+    color 200ms ease;
 }
 
 ::-webkit-scrollbar {
@@ -22,14 +86,14 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-track {
-  background: #0a0a0a;
+  background: var(--scrollbar-track);
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f1f1f;
+  background: var(--scrollbar-thumb);
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a2a2a;
+  background: var(--scrollbar-thumb-hover);
 }
 
 @layer components {
@@ -71,7 +135,7 @@ body {
   /* Inputs */
   .input {
     @apply w-full rounded-xl bg-surface px-3 py-2 text-sm text-ink shadow-neu-inset
-           placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-white/15;
+           placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-ink/15;
   }
 
   /* Card / surface */

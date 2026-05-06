@@ -93,6 +93,30 @@ def _extract_app_data(html: str, soup: BeautifulSoup | None = None) -> dict[str,
 
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _USER_LINK_RE = re.compile(r"/users/(\d+)/?")
+# Pulls the URL out of `style="background-image: url(...)"`. FunPay quotes the
+# URL inconsistently (single, double, or no quotes), so we accept all three.
+_BG_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")\s]+)['\"]?\s*\)", re.IGNORECASE)
+# Default placeholder avatar served by FunPay when a user has no photo. Treated
+# as "no avatar" so the frontend renders the initials fallback instead.
+_DEFAULT_AVATAR_PATH = "/img/layout/avatar.png"
+
+
+def _resolve_avatar(style: str | None) -> str | None:
+    """Extract a fully-qualified avatar URL from a `style` attribute, or None.
+
+    FunPay sets the avatar via `background-image: url(...)`. We resolve relative
+    URLs against the FunPay base so the frontend can render them directly, and
+    we drop the placeholder so the UI can fall back to initials.
+    """
+    if not style:
+        return None
+    match = _BG_URL_RE.search(style)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    if not raw or raw.endswith(_DEFAULT_AVATAR_PATH):
+        return None
+    return urljoin(_settings.funpay_base_url, raw)
 
 
 def _coerce_chat_id(chat_id: str) -> int | str:
@@ -209,16 +233,21 @@ class FunPayClient:
                 continue
             title_node = node.select_one(".media-user-name")
             preview_node = node.select_one(".contact-item-message")
+            avatar_node = node.select_one(".avatar-photo, .contact-item-photo")
             classes = node.get("class") or []
             title = (title_node.get_text(strip=True) if title_node else "") or f"chat {chat_id}"
             preview = preview_node.get_text(strip=True) if preview_node else None
             unread = "unread" in classes
+            avatar_style = avatar_node.get("style") if isinstance(avatar_node, Tag) else None
             previews.append(
                 ChatPreview(
                     id=str(chat_id),
                     title=title,
                     last_message=preview or None,
                     unread=unread,
+                    avatar_url=_resolve_avatar(
+                        avatar_style if isinstance(avatar_style, str) else None
+                    ),
                 )
             )
         return previews
