@@ -67,15 +67,16 @@ export default function Layout({ me, onLogout }: Props) {
           </button>
         </div>
       </aside>
-      <main className="relative min-w-0">
-        {/* Theme toggle floats in the top-right of the main pane so it stays
-            anchored regardless of which page is open. */}
-        <div className="pointer-events-none absolute right-0 top-0 z-10 flex justify-end">
-          <div className="pointer-events-auto">
-            <ThemeToggle />
-          </div>
+      <main className="flex min-h-0 min-w-0 flex-col gap-3">
+        {/* Top toolbar row reserves vertical space at the top of the main
+            pane so the theme toggle never overlaps page-level controls
+            (e.g. "+ Add account", "+ Install plugin", thread "Refresh"). */}
+        <div className="flex items-center justify-end">
+          <ThemeToggle />
         </div>
-        <Outlet />
+        <div className="min-h-0 min-w-0 flex-1">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

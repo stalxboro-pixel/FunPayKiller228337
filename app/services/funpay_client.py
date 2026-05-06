@@ -119,6 +119,49 @@ def _resolve_avatar(style: str | None) -> str | None:
     return urljoin(_settings.funpay_base_url, raw)
 
 
+# Block-level tags inside `.chat-msg-text` whose boundaries should produce a
+# newline in the rendered text. Inline tags are left as-is and separated by a
+# single space (see `_normalize_message_text`).
+_BLOCK_TAGS = frozenset(
+    {"p", "div", "li", "ul", "ol", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6"}
+)
+
+
+def _normalize_message_text(node: Tag) -> str:
+    """Extract message text from a BeautifulSoup node with line breaks preserved.
+
+    FunPay uses `<br>` for explicit line breaks (and occasionally wraps blocks
+    in `<p>`/`<div>`). The previous extraction used `get_text(separator=" ")`
+    which collapsed every break into a space, gluing whole paragraphs onto one
+    line. We replace `<br>` with `\\n` and append `\\n` after each block-level
+    descendant, then call `get_text(separator=" ")` so adjacent inline tags
+    still get a word boundary. Finally we normalize horizontal whitespace per
+    line and clamp consecutive blank lines so a single Enter is kept as one
+    `\\n` and runs of empty `<p>`s collapse to at most one blank line.
+    """
+    for br in node.find_all("br"):
+        br.replace_with("\n")
+    # Append a paragraph-break to each block so consecutive `<p>`s render with
+    # a blank line between them; the per-line collapse below clamps runs of
+    # blanks to at most one, so this stays bounded.
+    for block in node.find_all(True):
+        if isinstance(block, Tag) and block.name in _BLOCK_TAGS:
+            block.append("\n\n")
+    text = node.get_text(separator=" ")
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.split("\n")]
+    out: list[str] = []
+    blank = 0
+    for line in lines:
+        if not line:
+            blank += 1
+            if blank > 1:
+                continue
+        else:
+            blank = 0
+        out.append(line)
+    return "\n".join(out).strip()
+
+
 def _coerce_chat_id(chat_id: str) -> int | str:
     """FunPay treats numeric chat ids as ints; private chats use `users-<a>-<b>`."""
     if chat_id.isdigit():
@@ -326,14 +369,12 @@ class FunPayClient:
             text_node = soup.select_one(
                 ".chat-msg-text, .message-text, .alert.alert-with-icon.alert-info"
             )
-            # Use a separator so adjacent inline tags don't glue words together.
-            text = (
-                text_node.get_text(separator=" ", strip=True) if text_node else ""
-            )
+            # Preserve line breaks (`<br>`, block boundaries) so multi-line
+            # buyer messages and system alerts render with paragraphs rather
+            # than as one run-on sentence.
+            text = _normalize_message_text(text_node) if text_node else ""
             if not text:
-                text = soup.get_text(separator=" ", strip=True)
-            # Collapse runs of whitespace introduced by the separator.
-            text = re.sub(r"\s+", " ", text).strip()
+                text = _normalize_message_text(soup)
             sent_at = _parse_message_timestamp(raw)
             msgs.append(
                 ChatMessage(

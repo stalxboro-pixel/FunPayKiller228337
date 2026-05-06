@@ -75,7 +75,7 @@ export default function ChatsPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col gap-5">
+    <div className="flex h-full min-h-0 flex-col gap-5">
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="mr-3 text-2xl font-semibold tracking-wide">Chats</h1>
         <div className="flex flex-wrap gap-2">
