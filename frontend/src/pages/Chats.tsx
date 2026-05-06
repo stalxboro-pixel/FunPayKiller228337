@@ -7,6 +7,7 @@ import {
   type ChatPreview,
   type ChatThread,
 } from "../api";
+import Avatar from "../components/Avatar";
 
 export default function ChatsPage() {
   const [params, setParams] = useSearchParams();
@@ -74,7 +75,7 @@ export default function ChatsPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col gap-5">
+    <div className="flex h-full min-h-0 flex-col gap-5">
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="mr-3 text-2xl font-semibold tracking-wide">Chats</h1>
         <div className="flex flex-wrap gap-2">
@@ -175,16 +176,14 @@ function ChatList({
                 onClick={() => onSelect(c.id)}
                 className={active ? "chat-row-active" : "chat-row"}
               >
-                <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-surface shadow-neu-sm text-xs font-semibold uppercase">
-                  {initials(c.title)}
-                </div>
+                <Avatar name={c.title || c.id} src={c.avatar_url} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <div className="truncate text-sm font-medium">
                       {c.title || c.id}
                     </div>
                     {c.unread && (
-                      <span className="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-white" />
+                      <span className="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-ink" />
                     )}
                   </div>
                   {c.last_message && (
@@ -270,14 +269,20 @@ function ChatPane({
     );
   }
 
+  const peerAvatar = thread?.peer_avatar_url ?? null;
+  const peerName = thread?.title || chatId;
+
   return (
     <div className="card flex min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-line/40 pb-3">
-        <div className="min-w-0">
-          <div className="truncate text-base font-semibold">
-            {thread?.title || chatId}
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={peerName} src={peerAvatar} size="md" />
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold">
+              {thread?.title || chatId}
+            </div>
+            <div className="text-xs text-muted">Chat #{chatId}</div>
           </div>
-          <div className="text-xs text-muted">Chat #{chatId}</div>
         </div>
         <button
           className="btn-ghost text-xs"
@@ -296,21 +301,30 @@ function ChatPane({
         ) : thread.messages.length === 0 ? (
           <div className="text-sm text-muted">No messages yet.</div>
         ) : (
-          thread.messages.map((m, i) => (
-            <div
-              key={`${m.id ?? i}`}
-              className={`flex ${m.is_me ? "justify-end" : "justify-start"}`}
-            >
-              <div className={m.is_me ? "bubble-me" : "bubble-them"}>
-                {!m.is_me && m.author && (
-                  <div className="mb-0.5 text-[10px] uppercase tracking-wider text-muted">
-                    {m.author}
-                  </div>
+          thread.messages.map((m, i) => {
+            const showPeerAvatar = !m.is_me;
+            const authorName = m.author ?? peerName;
+            return (
+              <div
+                key={`${m.id ?? i}`}
+                className={`flex items-end gap-2 ${
+                  m.is_me ? "justify-end" : "justify-start"
+                }`}
+              >
+                {showPeerAvatar && (
+                  <Avatar name={authorName} src={peerAvatar} size="sm" />
                 )}
-                <div>{m.text}</div>
+                <div className={m.is_me ? "bubble-me" : "bubble-them"}>
+                  {!m.is_me && m.author && (
+                    <div className="mb-0.5 text-[10px] uppercase tracking-wider text-muted">
+                      {m.author}
+                    </div>
+                  )}
+                  <div>{m.text}</div>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
       {err && <div className="mt-2 text-sm text-danger">{err}</div>}
@@ -330,9 +344,4 @@ function ChatPane({
   );
 }
 
-function initials(title: string): string {
-  const parts = title.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "·";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-}
+

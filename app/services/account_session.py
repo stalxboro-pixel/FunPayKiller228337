@@ -108,10 +108,25 @@ class AccountSession:
             if not fresh and entry and entry.expires_at > now:
                 return entry.payload
             thread = await self._client.get_chat(chat_id)
+            thread = self._enrich_thread(thread)
             self._threads[chat_id] = _ThreadCacheEntry(
                 expires_at=now + _THREAD_TTL, payload=thread
             )
             return thread
+
+    def _enrich_thread(self, thread: ChatThread) -> ChatThread:
+        """Attach the peer avatar from the chat-list cache (best-effort)."""
+        if thread.peer_avatar_url is not None or self._chats is None:
+            return thread
+        for preview in self._chats.payload:
+            if preview.id == thread.id and preview.avatar_url:
+                return ChatThread(
+                    id=thread.id,
+                    title=thread.title,
+                    messages=thread.messages,
+                    peer_avatar_url=preview.avatar_url,
+                )
+        return thread
 
     async def send_message(self, chat_id: str, payload: SendMessageRequest) -> ChatThread:
         await self._ensure_open()
@@ -127,6 +142,7 @@ class AccountSession:
                     id=thread.id,
                     title=thread.title,
                     messages=[*thread.messages, new_msg],
+                    peer_avatar_url=thread.peer_avatar_url,
                 )
                 self._threads[chat_id] = _ThreadCacheEntry(
                     expires_at=time.monotonic(), payload=thread

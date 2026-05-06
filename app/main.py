@@ -78,14 +78,16 @@ def create_app() -> FastAPI:
             "camera=(), microphone=(), geolocation=(), payment=()",
         )
         # CSP: SPA + API only. No third-party frames, no inline scripts (Vite emits hashed
-        # files), no remote resources. `connect-src 'self'` keeps any plugin from exfiltrating
-        # data unless the operator explicitly relaxes the policy.
+        # files), no remote resources beyond FunPay-hosted user avatars rendered in the chat
+        # UI. `connect-src 'self'` keeps any plugin from exfiltrating data unless the operator
+        # explicitly relaxes the policy.
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; "
+            "img-src 'self' data: https://funpay.com https://*.funpay.com "
+            "https://sfunpay.com https://*.sfunpay.com; "
             "font-src 'self' data:; "
             "connect-src 'self'; "
             "form-action 'self'; "
