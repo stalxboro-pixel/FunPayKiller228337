@@ -219,15 +219,40 @@ function AccountCard({
     }
   }
 
+  const checkedEver = account.last_checked_at !== null;
+  const statusKind: "ok" | "fail" | "unknown" = !checkedEver
+    ? "unknown"
+    : account.last_check_ok
+      ? "ok"
+      : "fail";
   const statusText =
     check?.error ??
     account.last_check_error ??
-    (account.last_check_ok ? "Healthy" : "Not checked");
+    (statusKind === "ok"
+      ? "Healthy"
+      : statusKind === "fail"
+        ? "Check failed"
+        : "Not checked");
+  const dotClass = {
+    ok: "bg-success shadow-[0_0_8px_rgba(52,211,153,0.55)]",
+    fail: "bg-danger shadow-[0_0_8px_rgba(248,113,113,0.55)]",
+    unknown: "bg-muted",
+  }[statusKind];
+  const dotTitle = {
+    ok: "Last check succeeded",
+    fail: "Last check failed",
+    unknown: "Not yet checked",
+  }[statusKind];
 
   return (
     <div className="card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`inline-block h-2.5 w-2.5 rounded-full ${dotClass}`}
+            title={dotTitle}
+            aria-label={dotTitle}
+          />
           <h3 className="text-lg font-semibold">{account.label}</h3>
           <span className="chip">{account.enabled ? "enabled" : "disabled"}</span>
           {account.proxy_present && <span className="chip">proxy</span>}
@@ -242,13 +267,10 @@ function AccountCard({
             <>FunPay: not yet probed</>
           )}
         </div>
-        <div className="mt-1 text-xs">
-          <span className={`mr-2 ${account.last_check_ok ? "text-ink" : "text-danger"}`}>
-            ●
-          </span>
-          <span className="text-ink2">{statusText}</span>
-          {account.note ? <span className="ml-2 text-muted">— {account.note}</span> : null}
-        </div>
+        <div className="mt-1 text-xs text-ink2">{statusText}</div>
+        {account.note && (
+          <div className="mt-1 text-xs text-muted">— {account.note}</div>
+        )}
       </div>
       <div className="flex flex-wrap gap-2">
         <Link
