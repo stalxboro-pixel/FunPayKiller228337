@@ -93,6 +93,73 @@ def _extract_app_data(html: str, soup: BeautifulSoup | None = None) -> dict[str,
 
 _CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 _USER_LINK_RE = re.compile(r"/users/(\d+)/?")
+# Pulls the URL out of `style="background-image: url(...)"`. FunPay quotes the
+# URL inconsistently (single, double, or no quotes), so we accept all three.
+_BG_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")\s]+)['\"]?\s*\)", re.IGNORECASE)
+# Default placeholder avatar served by FunPay when a user has no photo. Treated
+# as "no avatar" so the frontend renders the initials fallback instead.
+_DEFAULT_AVATAR_PATH = "/img/layout/avatar.png"
+
+
+def _resolve_avatar(style: str | None) -> str | None:
+    """Extract a fully-qualified avatar URL from a `style` attribute, or None.
+
+    FunPay sets the avatar via `background-image: url(...)`. We resolve relative
+    URLs against the FunPay base so the frontend can render them directly, and
+    we drop the placeholder so the UI can fall back to initials.
+    """
+    if not style:
+        return None
+    match = _BG_URL_RE.search(style)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    if not raw or raw.endswith(_DEFAULT_AVATAR_PATH):
+        return None
+    return urljoin(_settings.funpay_base_url, raw)
+
+
+# Block-level tags inside `.chat-msg-text` whose boundaries should produce a
+# newline in the rendered text. Inline tags are left as-is and separated by a
+# single space (see `_normalize_message_text`).
+_BLOCK_TAGS = frozenset(
+    {"p", "div", "li", "ul", "ol", "blockquote", "pre", "h1", "h2", "h3", "h4", "h5", "h6"}
+)
+
+
+def _normalize_message_text(node: Tag) -> str:
+    """Extract message text from a BeautifulSoup node with line breaks preserved.
+
+    FunPay uses `<br>` for explicit line breaks (and occasionally wraps blocks
+    in `<p>`/`<div>`). The previous extraction used `get_text(separator=" ")`
+    which collapsed every break into a space, gluing whole paragraphs onto one
+    line. We replace `<br>` with `\\n` and append `\\n` after each block-level
+    descendant, then call `get_text(separator=" ")` so adjacent inline tags
+    still get a word boundary. Finally we normalize horizontal whitespace per
+    line and clamp consecutive blank lines so a single Enter is kept as one
+    `\\n` and runs of empty `<p>`s collapse to at most one blank line.
+    """
+    for br in node.find_all("br"):
+        br.replace_with("\n")
+    # Append a paragraph-break to each block so consecutive `<p>`s render with
+    # a blank line between them; the per-line collapse below clamps runs of
+    # blanks to at most one, so this stays bounded.
+    for block in node.find_all(True):
+        if isinstance(block, Tag) and block.name in _BLOCK_TAGS:
+            block.append("\n\n")
+    text = node.get_text(separator=" ")
+    lines = [re.sub(r"[ \t\u00a0]+", " ", line).strip() for line in text.split("\n")]
+    out: list[str] = []
+    blank = 0
+    for line in lines:
+        if not line:
+            blank += 1
+            if blank > 1:
+                continue
+        else:
+            blank = 0
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 def _coerce_chat_id(chat_id: str) -> int | str:
@@ -209,16 +276,21 @@ class FunPayClient:
                 continue
             title_node = node.select_one(".media-user-name")
             preview_node = node.select_one(".contact-item-message")
+            avatar_node = node.select_one(".avatar-photo, .contact-item-photo")
             classes = node.get("class") or []
             title = (title_node.get_text(strip=True) if title_node else "") or f"chat {chat_id}"
             preview = preview_node.get_text(strip=True) if preview_node else None
             unread = "unread" in classes
+            avatar_style = avatar_node.get("style") if isinstance(avatar_node, Tag) else None
             previews.append(
                 ChatPreview(
                     id=str(chat_id),
                     title=title,
                     last_message=preview or None,
                     unread=unread,
+                    avatar_url=_resolve_avatar(
+                        avatar_style if isinstance(avatar_style, str) else None
+                    ),
                 )
             )
         return previews
@@ -276,9 +348,13 @@ class FunPayClient:
                 interlocutor_name = author
 
             # Strip non-message scaffolding (avatar, header link with the
-            # username, and any image-attachment chrome) so it doesn't bleed
-            # into the body text.
+            # username, day-divider date, per-message timestamp tooltip,
+            # role-labels like "автоответ" / "оповещение", and any image
+            # attachment chrome) so they don't bleed into the body text.
             for sel in (
+                ".chat-message-list-date",
+                ".chat-msg-date",
+                ".chat-msg-author-label",
                 ".media-user-name",
                 ".message-author",
                 ".chat-message-author",
@@ -291,16 +367,14 @@ class FunPayClient:
                     node.decompose()
 
             text_node = soup.select_one(
-                ".message-text, .alert.alert-with-icon.alert-info"
+                ".chat-msg-text, .message-text, .alert.alert-with-icon.alert-info"
             )
-            # Use a separator so adjacent inline tags don't glue words together.
-            text = (
-                text_node.get_text(separator=" ", strip=True) if text_node else ""
-            )
+            # Preserve line breaks (`<br>`, block boundaries) so multi-line
+            # buyer messages and system alerts render with paragraphs rather
+            # than as one run-on sentence.
+            text = _normalize_message_text(text_node) if text_node else ""
             if not text:
-                text = soup.get_text(separator=" ", strip=True)
-            # Collapse runs of whitespace introduced by the separator.
-            text = re.sub(r"\s+", " ", text).strip()
+                text = _normalize_message_text(soup)
             sent_at = _parse_message_timestamp(raw)
             msgs.append(
                 ChatMessage(

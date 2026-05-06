@@ -7,6 +7,7 @@ import {
   type ChatPreview,
   type ChatThread,
 } from "../api";
+import Avatar from "../components/Avatar";
 
 export default function ChatsPage() {
   const [params, setParams] = useSearchParams();
@@ -74,7 +75,7 @@ export default function ChatsPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] flex-col gap-5">
+    <div className="flex h-full min-h-0 flex-col gap-5">
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="mr-3 text-2xl font-semibold tracking-wide">Chats</h1>
         <div className="flex flex-wrap gap-2">
@@ -140,7 +141,10 @@ function ChatList({
 
   useEffect(() => {
     void load(false);
-    const id = window.setInterval(() => void load(false), 15_000);
+    // Poll the chat list often enough that new threads (or new last-message
+    // previews) appear without forcing the operator to click Refresh. The
+    // backend `_CHAT_LIST_TTL` keeps this from hammering FunPay.
+    const id = window.setInterval(() => void load(false), 10_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
@@ -175,16 +179,14 @@ function ChatList({
                 onClick={() => onSelect(c.id)}
                 className={active ? "chat-row-active" : "chat-row"}
               >
-                <div className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-surface shadow-neu-sm text-xs font-semibold uppercase">
-                  {initials(c.title)}
-                </div>
+                <Avatar name={c.title || c.id} src={c.avatar_url} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <div className="truncate text-sm font-medium">
                       {c.title || c.id}
                     </div>
                     {c.unread && (
-                      <span className="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-white" />
+                      <span className="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-ink" />
                     )}
                   </div>
                   {c.last_message && (
@@ -214,6 +216,12 @@ function ChatPane({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Tracks whether the user is currently parked at the bottom of the message
+  // list. We only auto-scroll on poll updates if true — otherwise scrolling
+  // up to read history would yank the operator back to the bottom every
+  // poll tick. Initial value is `true` so the first render pins to bottom.
+  const stickToBottomRef = useRef(true);
 
   async function load(force: boolean) {
     if (chatId === null) return;
@@ -231,21 +239,51 @@ function ChatPane({
 
   useEffect(() => {
     setThread(null);
+    stickToBottomRef.current = true;
     if (chatId === null) return;
     void load(false);
-    const id = window.setInterval(() => void load(false), 5_000);
+    // 3s poll keeps incoming buyer messages flowing into the open thread
+    // without manual refresh; backend `_THREAD_TTL` is tuned to match.
+    const id = window.setInterval(() => void load(false), 3_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, chatId]);
 
   useEffect(() => {
     const el = messagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [thread]);
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (chatId === null || !text.trim()) return;
+  function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    // 80px tolerance so a couple of pixels of scroll-jitter still counts as
+    // "at the bottom" — same threshold popular messengers use.
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  function autosizeInput() {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    // Cap at ~6 lines (≈144px) before the textarea gives up vertical growth
+    // and starts scrolling internally; otherwise a 200-line message would
+    // hide the entire conversation.
+    ta.style.height = `${Math.min(ta.scrollHeight, 144)}px`;
+  }
+
+  useEffect(() => {
+    autosizeInput();
+  }, [text]);
+
+  async function send() {
+    if (chatId === null || !text.trim() || sending) return;
+    // Sending is an explicit user intent to bring the thread to the
+    // bottom — re-pin the auto-scroll regardless of where they were.
+    stickToBottomRef.current = true;
     setSending(true);
     setErr(null);
     try {
@@ -262,6 +300,21 @@ function ChatPane({
     }
   }
 
+  function onFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void send();
+  }
+
+  function onInputKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends, Shift+Enter inserts a newline. Mirrors Slack/Telegram so
+    // multi-line buyer-style replies feel natural without losing the fast
+    // single-line case.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void send();
+    }
+  }
+
   if (chatId === null) {
     return (
       <div className="card grid place-items-center text-sm text-muted">
@@ -270,14 +323,20 @@ function ChatPane({
     );
   }
 
+  const peerAvatar = thread?.peer_avatar_url ?? null;
+  const peerName = thread?.title || chatId;
+
   return (
     <div className="card flex min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between gap-3 border-b border-line/40 pb-3">
-        <div className="min-w-0">
-          <div className="truncate text-base font-semibold">
-            {thread?.title || chatId}
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={peerName} src={peerAvatar} size="md" />
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold">
+              {thread?.title || chatId}
+            </div>
+            <div className="text-xs text-muted">Chat #{chatId}</div>
           </div>
-          <div className="text-xs text-muted">Chat #{chatId}</div>
         </div>
         <button
           className="btn-ghost text-xs"
@@ -289,37 +348,50 @@ function ChatPane({
       </div>
       <div
         ref={messagesRef}
-        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1"
+        onScroll={onMessagesScroll}
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1 pb-3"
       >
         {thread === null ? (
           <div className="text-sm text-muted">Loading…</div>
         ) : thread.messages.length === 0 ? (
           <div className="text-sm text-muted">No messages yet.</div>
         ) : (
-          thread.messages.map((m, i) => (
-            <div
-              key={`${m.id ?? i}`}
-              className={`flex ${m.is_me ? "justify-end" : "justify-start"}`}
-            >
-              <div className={m.is_me ? "bubble-me" : "bubble-them"}>
-                {!m.is_me && m.author && (
-                  <div className="mb-0.5 text-[10px] uppercase tracking-wider text-muted">
-                    {m.author}
-                  </div>
+          thread.messages.map((m, i) => {
+            const showPeerAvatar = !m.is_me;
+            const authorName = m.author ?? peerName;
+            return (
+              <div
+                key={`${m.id ?? i}`}
+                className={`flex items-end gap-2 ${
+                  m.is_me ? "justify-end" : "justify-start"
+                }`}
+              >
+                {showPeerAvatar && (
+                  <Avatar name={authorName} src={peerAvatar} size="sm" />
                 )}
-                <div>{m.text}</div>
+                <div className={m.is_me ? "bubble-me" : "bubble-them"}>
+                  {!m.is_me && m.author && (
+                    <div className="mb-0.5 text-[10px] uppercase tracking-wider text-muted">
+                      {m.author}
+                    </div>
+                  )}
+                  <div>{m.text}</div>
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
       {err && <div className="mt-2 text-sm text-danger">{err}</div>}
-      <form onSubmit={send} className="mt-3 flex items-center gap-2">
-        <input
-          className="input"
-          placeholder="Type a message…"
+      <form onSubmit={onFormSubmit} className="mt-3 flex items-end gap-2">
+        <textarea
+          ref={inputRef}
+          className="input min-h-[2.5rem] max-h-36 resize-none leading-relaxed"
+          placeholder="Type a message…  (Shift+Enter — new line)"
           value={text}
+          rows={1}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={onInputKeyDown}
           disabled={sending}
         />
         <button className="btn-primary" disabled={sending || !text.trim()}>
@@ -330,9 +402,4 @@ function ChatPane({
   );
 }
 
-function initials(title: string): string {
-  const parts = title.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return "·";
-  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
-  return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-}
+

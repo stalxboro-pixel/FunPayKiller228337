@@ -101,6 +101,7 @@ export type ChatPreview = {
   title: string;
   last_message: string | null;
   unread: boolean;
+  avatar_url: string | null;
 };
 
 export type ChatMessage = {
@@ -115,6 +116,7 @@ export type ChatThread = {
   id: string;
   title: string;
   messages: ChatMessage[];
+  peer_avatar_url: string | null;
 };
 
 export type AccountCheckResult = {

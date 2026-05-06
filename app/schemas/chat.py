@@ -13,6 +13,7 @@ class ChatPreview(BaseModel):
     title: str
     last_message: str | None = None
     unread: bool = False
+    avatar_url: str | None = None
 
 
 class ChatMessage(BaseModel):
@@ -27,6 +28,7 @@ class ChatThread(BaseModel):
     id: str
     title: str
     messages: list[ChatMessage]
+    peer_avatar_url: str | None = None
 
 
 class SendMessageRequest(BaseModel):

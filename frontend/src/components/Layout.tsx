@@ -1,5 +1,6 @@
 import { Link, NavLink, Outlet } from "react-router-dom";
 import { type Me } from "../api";
+import ThemeToggle from "./ThemeToggle";
 
 type Props = {
   me: Me;
@@ -12,10 +13,10 @@ const NAV: Array<{
   end?: boolean;
   icon: string;
 }> = [
-  { to: "/", label: "Home", end: true, icon: "◇" },
-  { to: "/accounts", label: "Acct", icon: "◎" },
-  { to: "/chats", label: "Chat", icon: "❒" },
-  { to: "/plugins", label: "Plug", icon: "✦" },
+  { to: "/", label: "Home", end: true, icon: "🏠" },
+  { to: "/accounts", label: "Acct", icon: "👤" },
+  { to: "/chats", label: "Chat", icon: "💬" },
+  { to: "/plugins", label: "Plug", icon: "🧩" },
 ];
 
 export default function Layout({ me, onLogout }: Props) {
@@ -42,7 +43,7 @@ export default function Layout({ me, onLogout }: Props) {
                   : "flex flex-col items-center gap-0.5 rounded-xl px-1 py-2 text-[10px] uppercase tracking-wider text-ink2 transition-shadow hover:text-ink"
               }
             >
-              <span aria-hidden className="text-base leading-none">
+              <span aria-hidden className="text-lg leading-none">
                 {item.icon}
               </span>
               {item.label}
@@ -66,8 +67,16 @@ export default function Layout({ me, onLogout }: Props) {
           </button>
         </div>
       </aside>
-      <main className="min-w-0">
-        <Outlet />
+      <main className="flex min-h-0 min-w-0 flex-col gap-3">
+        {/* Top toolbar row reserves vertical space at the top of the main
+            pane so the theme toggle never overlaps page-level controls
+            (e.g. "+ Add account", "+ Install plugin", thread "Refresh"). */}
+        <div className="flex items-center justify-end">
+          <ThemeToggle />
+        </div>
+        <div className="min-h-0 min-w-0 flex-1">
+          <Outlet />
+        </div>
       </main>
     </div>
   );
