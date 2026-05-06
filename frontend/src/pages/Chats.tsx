@@ -141,7 +141,10 @@ function ChatList({
 
   useEffect(() => {
     void load(false);
-    const id = window.setInterval(() => void load(false), 15_000);
+    // Poll the chat list often enough that new threads (or new last-message
+    // previews) appear without forcing the operator to click Refresh. The
+    // backend `_CHAT_LIST_TTL` keeps this from hammering FunPay.
+    const id = window.setInterval(() => void load(false), 10_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
@@ -213,6 +216,12 @@ function ChatPane({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Tracks whether the user is currently parked at the bottom of the message
+  // list. We only auto-scroll on poll updates if true — otherwise scrolling
+  // up to read history would yank the operator back to the bottom every
+  // poll tick. Initial value is `true` so the first render pins to bottom.
+  const stickToBottomRef = useRef(true);
 
   async function load(force: boolean) {
     if (chatId === null) return;
@@ -230,21 +239,51 @@ function ChatPane({
 
   useEffect(() => {
     setThread(null);
+    stickToBottomRef.current = true;
     if (chatId === null) return;
     void load(false);
-    const id = window.setInterval(() => void load(false), 5_000);
+    // 3s poll keeps incoming buyer messages flowing into the open thread
+    // without manual refresh; backend `_THREAD_TTL` is tuned to match.
+    const id = window.setInterval(() => void load(false), 3_000);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId, chatId]);
 
   useEffect(() => {
     const el = messagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [thread]);
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
-    if (chatId === null || !text.trim()) return;
+  function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    // 80px tolerance so a couple of pixels of scroll-jitter still counts as
+    // "at the bottom" — same threshold popular messengers use.
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  function autosizeInput() {
+    const ta = inputRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    // Cap at ~6 lines (≈144px) before the textarea gives up vertical growth
+    // and starts scrolling internally; otherwise a 200-line message would
+    // hide the entire conversation.
+    ta.style.height = `${Math.min(ta.scrollHeight, 144)}px`;
+  }
+
+  useEffect(() => {
+    autosizeInput();
+  }, [text]);
+
+  async function send() {
+    if (chatId === null || !text.trim() || sending) return;
+    // Sending is an explicit user intent to bring the thread to the
+    // bottom — re-pin the auto-scroll regardless of where they were.
+    stickToBottomRef.current = true;
     setSending(true);
     setErr(null);
     try {
@@ -258,6 +297,21 @@ function ChatPane({
       setErr(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setSending(false);
+    }
+  }
+
+  function onFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void send();
+  }
+
+  function onInputKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter sends, Shift+Enter inserts a newline. Mirrors Slack/Telegram so
+    // multi-line buyer-style replies feel natural without losing the fast
+    // single-line case.
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      void send();
     }
   }
 
@@ -294,7 +348,8 @@ function ChatPane({
       </div>
       <div
         ref={messagesRef}
-        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1"
+        onScroll={onMessagesScroll}
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1 pb-3"
       >
         {thread === null ? (
           <div className="text-sm text-muted">Loading…</div>
@@ -328,12 +383,15 @@ function ChatPane({
         )}
       </div>
       {err && <div className="mt-2 text-sm text-danger">{err}</div>}
-      <form onSubmit={send} className="mt-3 flex items-center gap-2">
-        <input
-          className="input"
-          placeholder="Type a message…"
+      <form onSubmit={onFormSubmit} className="mt-3 flex items-end gap-2">
+        <textarea
+          ref={inputRef}
+          className="input min-h-[2.5rem] max-h-36 resize-none leading-relaxed"
+          placeholder="Type a message…  (Shift+Enter — new line)"
           value={text}
+          rows={1}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={onInputKeyDown}
           disabled={sending}
         />
         <button className="btn-primary" disabled={sending || !text.trim()}>

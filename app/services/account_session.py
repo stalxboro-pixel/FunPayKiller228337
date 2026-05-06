@@ -33,8 +33,12 @@ from app.services.funpay_client import (
     FunPayProfile,
 )
 
-_CHAT_LIST_TTL = 5.0
-_THREAD_TTL = 3.0
+# Cache TTLs are tuned slightly below the frontend poll cadence so each poll
+# tick performs a real fetch from FunPay instead of returning a stale cached
+# payload — that's what makes incoming messages appear in the open thread
+# without the operator having to click Refresh.
+_CHAT_LIST_TTL = 3.0
+_THREAD_TTL = 2.0
 _PROFILE_TTL = 60.0
 
 
