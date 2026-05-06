@@ -15,6 +15,7 @@ export default {
         muted: "#7c7c7c",
         accent: "#ffffff",
         danger: "#f87171",
+        success: "#34d399",
       },
       fontFamily: {
         sans: [

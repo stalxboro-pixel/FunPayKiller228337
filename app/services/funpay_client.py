@@ -276,9 +276,13 @@ class FunPayClient:
                 interlocutor_name = author
 
             # Strip non-message scaffolding (avatar, header link with the
-            # username, and any image-attachment chrome) so it doesn't bleed
-            # into the body text.
+            # username, day-divider date, per-message timestamp tooltip,
+            # role-labels like "автоответ" / "оповещение", and any image
+            # attachment chrome) so they don't bleed into the body text.
             for sel in (
+                ".chat-message-list-date",
+                ".chat-msg-date",
+                ".chat-msg-author-label",
                 ".media-user-name",
                 ".message-author",
                 ".chat-message-author",
@@ -291,7 +295,7 @@ class FunPayClient:
                     node.decompose()
 
             text_node = soup.select_one(
-                ".message-text, .alert.alert-with-icon.alert-info"
+                ".chat-msg-text, .message-text, .alert.alert-with-icon.alert-info"
             )
             # Use a separator so adjacent inline tags don't glue words together.
             text = (
